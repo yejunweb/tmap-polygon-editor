@@ -1,15 +1,15 @@
 # 腾讯地图多边形编辑器
 
-基于 [腾讯位置服务 JavaScript API GL](https://lbs.qq.com/webApi/javascriptGL/glGuide/glOverview) 的多边形坐标可视化编辑工具。在地图上拖拽调整多边形顶点后，可将结果复制为坐标数组或 GeoJSON。
+基于 [腾讯位置服务 JavaScript API GL](https://lbs.qq.com/webApi/javascriptGL/glGuide/glOverview) 的多边形坐标可视化编辑工具。在地图上拖拽调整多边形顶点后，可将结果复制为坐标数组、GeoJSON 或 WKT。
 
 在线使用：<https://yejunweb.github.io/tmap-polygon-editor/>
 
 ## 功能
 
-- 将坐标数组或 GeoJSON 绘制到腾讯地图
+- 将坐标数组、GeoJSON 或 WKT 绘制到腾讯地图
 - 拖拽顶点、边中点调整多边形，支持捕捉
-- 输出为数组或 GeoJSON（Polygon / MultiPolygon）
-- 复制时可选压缩 JSON 或格式化文本
+- 输入/输出可选：数组、GeoJSON、WKT（数据库 `POLYGON ((lng lat, ...))` 字符格式）
+- 复制时可选压缩 JSON 或格式化文本（WKT 按原文字符复制）
 - 侧栏可收起，地图会自适应尺寸
 
 ## 本地使用
@@ -31,13 +31,19 @@ npx serve .
 
 部署到 GitHub Pages 时，请在控制台把 Key 的授权域名加上 `yejunweb.github.io`。
 
-## 输入格式
+## 输入 / 输出格式
 
-在右侧「输入」框粘贴 JSON 后点击「确定」。支持：
+在右侧选择「输入类型」，粘贴对应文本后点击「确定」。输出侧同样可选三种类型：
 
-- 坐标点数组：`[{ "lat": 22.54, "lng": 114.05 }, ...]` 或 `[lat, lng]` / `[lng, lat]`
-- GeoJSON `Polygon` / `MultiPolygon`
-- GeoJSON `Feature` / `FeatureCollection`（取第一个可用 geometry）
+- **数组**：`[{ "lat": 22.54, "lng": 114.05 }, ...]` 或 `[lat, lng]` / `[lng, lat]`
+- **GeoJSON**：`Polygon` / `MultiPolygon`，以及 `Feature` / `FeatureCollection`（取第一个可用 geometry）
+- **WKT**：数据库常用的字符格式，例如：
+
+```text
+POLYGON ((113.876491 22.471723, 113.879306 22.472951, 113.876491 22.471723))
+```
+
+也支持 `MULTIPOLYGON`、带引号的字符串，以及 `SRID=4326;POLYGON ((...))`。坐标顺序为 `经度 纬度`。
 
 调整完成后，在「输出结果」中选择类型并复制。
 

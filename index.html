@@ -224,12 +224,19 @@
             <section class="panel">
                 <div class="panel-header">
                     <span class="panel-title">输入</span>
+                    <label class="field-label">输入类型
+                        <select id="inputFormat">
+                            <option value="array">数组</option>
+                            <option value="geojson" selected>GeoJSON</option>
+                            <option value="wkt">WKT</option>
+                        </select>
+                    </label>
                     <span class="spacer"></span>
                     <button class="btn" id="submitBtn" type="button">确定</button>
                 </div>
                 <p class="error" id="inputError"></p>
                 <textarea id="inputText" spellcheck="false"
-                    placeholder="支持数组或 GeoJSON"></textarea>
+                    placeholder="GeoJSON Polygon / MultiPolygon"></textarea>
             </section>
             <section class="panel">
                 <div class="panel-header">
@@ -238,9 +245,10 @@
                         <select id="outputFormat">
                             <option value="array">数组</option>
                             <option value="geojson">GeoJSON</option>
+                            <option value="wkt">WKT</option>
                         </select>
                     </label>
-                    <label class="field-label">复制格式
+                    <label class="field-label" id="copyFormatLabel">复制格式
                         <select id="copyFormat">
                             <option value="json">JSON</option>
                             <option value="pretty">格式化</option>
@@ -261,6 +269,11 @@
         var lastPaths = null;
         var POLYGON_ID = 'polygon-1';
         var LAYER_ID = 'polygon';
+        var INPUT_PLACEHOLDERS = {
+            array: '坐标数组，如 [{"lat":22.54,"lng":114.05}, ...] 或 [[lng, lat], ...]',
+            geojson: 'GeoJSON Polygon / MultiPolygon',
+            wkt: 'WKT，如 POLYGON ((lng lat, lng lat, ...))'
+        };
         var DEFAULT_GEOJSON = {
             type: 'Polygon',
             coordinates: [[
@@ -452,18 +465,7 @@
             throw new Error('仅支持 Polygon / MultiPolygon');
         }
 
-        function parseInputToPathList(rawText) {
-            var text = (rawText || '').trim();
-            if (!text) {
-                throw new Error('请输入坐标数组或 GeoJSON');
-            }
-            var data;
-            try {
-                data = JSON.parse(text);
-            } catch (err) {
-                throw new Error('JSON 解析失败，请检查输入格式');
-            }
-
+        function parseGeoJSONInput(data) {
             if (data && data.type === 'FeatureCollection') {
                 if (!data.features || !data.features.length || !data.features[0].geometry) {
                     throw new Error('FeatureCollection 中没有可用的 geometry');
@@ -479,11 +481,13 @@
             if (data && data.geometry && (data.geometry.type === 'Polygon' || data.geometry.type === 'MultiPolygon')) {
                 return parseGeoJSONGeometry(data.geometry);
             }
+            throw new Error('请输入 GeoJSON Polygon / MultiPolygon');
+        }
 
+        function parseArrayInput(data) {
             if (!Array.isArray(data) || !data.length) {
                 throw new Error('数组不能为空');
             }
-
             if (looksLikePolygonRings(data) && looksLikePolygonRings(data[0])) {
                 return data.map(function (polygon) {
                     var rings = polygon.map(ringToLatLngs);
@@ -497,7 +501,120 @@
             if (looksLikeRing(data)) {
                 return [ringToLatLngs(data)];
             }
-            throw new Error('无法识别的输入格式，请使用坐标数组或 GeoJSON');
+            throw new Error('无法识别的数组格式');
+        }
+
+        function unwrapQuotedText(text) {
+            if (
+                (text.charAt(0) === "'" && text.charAt(text.length - 1) === "'") ||
+                (text.charAt(0) === '"' && text.charAt(text.length - 1) === '"')
+            ) {
+                return text.slice(1, -1).trim();
+            }
+            return text;
+        }
+
+        function extractWktGroups(text) {
+            var groups = [];
+            var i = 0;
+            while (i < text.length) {
+                while (i < text.length && (text.charAt(i) === ' ' || text.charAt(i) === '\n' || text.charAt(i) === '\r' || text.charAt(i) === '\t' || text.charAt(i) === ',')) {
+                    i++;
+                }
+                if (i >= text.length) break;
+                if (text.charAt(i) !== '(') {
+                    throw new Error('WKT 格式不正确');
+                }
+                var depth = 1;
+                var start = i + 1;
+                i++;
+                while (i < text.length && depth > 0) {
+                    var ch = text.charAt(i);
+                    if (ch === '(') depth++;
+                    else if (ch === ')') depth--;
+                    i++;
+                }
+                if (depth !== 0) {
+                    throw new Error('WKT 括号不匹配');
+                }
+                groups.push(text.slice(start, i - 1));
+            }
+            return groups;
+        }
+
+        function parseWktRing(coordText) {
+            var pairs = coordText.split(',').map(function (item) { return item.trim(); }).filter(Boolean);
+            if (!pairs.length) {
+                throw new Error('WKT 坐标环不能为空');
+            }
+            return pairs.map(function (pair) {
+                var parts = pair.trim().split(/\s+/);
+                if (parts.length < 2) {
+                    throw new Error('WKT 坐标点格式不正确');
+                }
+                var lng = Number(parts[0]);
+                var lat = Number(parts[1]);
+                if (!isFiniteNumber(lng) || !isFiniteNumber(lat)) {
+                    throw new Error('WKT 坐标点不是有效数字');
+                }
+                return createLatLng(lat, lng);
+            });
+        }
+
+        function parseWktPolygonBody(body) {
+            var rings = extractWktGroups(body).map(parseWktRing);
+            if (!rings.length) {
+                throw new Error('WKT POLYGON 不能为空');
+            }
+            return rings.length === 1 ? rings[0] : rings;
+        }
+
+        function parseWktToPathList(rawText) {
+            var text = unwrapQuotedText((rawText || '').trim()).replace(/^SRID=\d+\s*;\s*/i, '');
+            var typeMatch = text.match(/^(MULTI)?POLYGON\s*([\s\S]+)$/i);
+            if (!typeMatch) {
+                throw new Error('仅支持 POLYGON / MULTIPOLYGON 字符格式');
+            }
+            var body = typeMatch[2].trim();
+            var outer = extractWktGroups(body);
+            if (outer.length !== 1) {
+                throw new Error(typeMatch[1] ? 'WKT MULTIPOLYGON 格式不正确' : 'WKT POLYGON 格式不正确');
+            }
+            if (typeMatch[1]) {
+                var polygons = extractWktGroups(outer[0]);
+                if (!polygons.length) {
+                    throw new Error('WKT MULTIPOLYGON 不能为空');
+                }
+                return polygons.map(parseWktPolygonBody);
+            }
+            return [parseWktPolygonBody(outer[0])];
+        }
+
+        function parseInputToPathList(rawText, format) {
+            var text = (rawText || '').trim();
+            if (!text) {
+                throw new Error('请输入坐标数组、GeoJSON 或 WKT');
+            }
+            if (format === 'wkt') {
+                return parseWktToPathList(text);
+            }
+            var data;
+            try {
+                data = JSON.parse(text);
+            } catch (err) {
+                throw new Error(format === 'geojson' ? 'GeoJSON 解析失败，请检查输入格式' : 'JSON 解析失败，请检查输入格式');
+            }
+            if (format === 'geojson') {
+                return parseGeoJSONInput(data);
+            }
+            if (format === 'array') {
+                return parseArrayInput(data);
+            }
+            try {
+                return parseGeoJSONInput(data);
+            } catch (err) {
+                return parseArrayInput(data);
+            }
         }
 
         function flattenLatLngs(paths, result) {
@@ -577,8 +694,39 @@
             });
         }
 
+        function formatWktNumber(n) {
+            var num = Number(n);
+            if (!isFinite(num)) return String(n);
+            return String(Number(num.toFixed(8)));
+        }
+
+        function ringToWkt(ring) {
+            return '(' + closeRing(ring).map(function (p) {
+                return formatWktNumber(p[0]) + ' ' + formatWktNumber(p[1]);
+            }).join(', ') + ')';
+        }
+
+        function polygonCoordinatesToWktBody(coordinates) {
+            return '(' + coordinates.map(ringToWkt).join(', ') + ')';
+        }
+
+        function formatAsWkt(paths) {
+            if (typeof paths[0].lat === 'number') {
+                return 'POLYGON ' + polygonCoordinatesToWktBody(serializedToGeoJSONCoordinates(paths));
+            }
+            if (paths[0] && paths[0].length && typeof paths[0][0].lat === 'number') {
+                return 'POLYGON ' + polygonCoordinatesToWktBody(serializedToGeoJSONCoordinates(paths));
+            }
+            return 'MULTIPOLYGON (' + paths.map(function (polygonPaths) {
+                return polygonCoordinatesToWktBody(serializedToGeoJSONCoordinates(polygonPaths));
+            }).join(', ') + ')';
+        }
+
         function formatOutput(paths, format) {
             if (!paths) return '';
+            if (format === 'wkt') {
+                return formatAsWkt(paths);
+            }
             if (format === 'geojson') {
                 var geojson;
                 if (typeof paths[0].lat === 'number') {
@@ -650,7 +798,10 @@
         function submitInput() {
             showInputError('');
             try {
-                var pathList = parseInputToPathList(document.getElementById('inputText').value);
+                var pathList = parseInputToPathList(
+                    document.getElementById('inputText').value,
+                    document.getElementById('inputFormat').value
+                );
                 renderPolygons(pathList);
                 fitToPolygon(pathList);
                 lastPaths = serializePaths(pathList.length === 1 ? pathList[0] : pathList);
@@ -663,6 +814,7 @@
         function getCopyText() {
             var pretty = document.getElementById('outputText').value;
             if (!pretty) return '';
+            if (document.getElementById('outputFormat').value === 'wkt') return pretty;
             var copyFormat = document.getElementById('copyFormat').value;
             if (copyFormat === 'json') {
                 try {
@@ -672,6 +824,19 @@
                 }
             }
             return pretty;
+        }
+
+        function syncCopyFormatVisibility() {
+            var isWkt = document.getElementById('outputFormat').value === 'wkt';
+            document.getElementById('copyFormatLabel').style.display = isWkt ? 'none' : '';
+        }
+
+        function syncInputFormatView() {
+            var format = document.getElementById('inputFormat').value;
+            document.getElementById('inputText').placeholder = INPUT_PLACEHOLDERS[format] || '';
+            if (lastPaths) {
+                document.getElementById('inputText').value = formatOutput(lastPaths, format);
+            }
         }
 
         function copyOutput() {
@@ -730,7 +895,11 @@
 
             document.getElementById('submitBtn').addEventListener('click', submitInput);
             document.getElementById('copyBtn').addEventListener('click', copyOutput);
-            document.getElementById('outputFormat').addEventListener('change', refreshOutput);
+            document.getElementById('outputFormat').addEventListener('change', function () {
+                syncCopyFormatVisibility();
+                refreshOutput();
+            });
+            document.getElementById('inputFormat').addEventListener('change', syncInputFormatView);
             document.getElementById('sidebarToggle').addEventListener('mousedown', function (event) {
                 event.stopPropagation();
             });
@@ -746,7 +915,10 @@
             });
             window.addEventListener('resize', resizeMap);
 
+            document.getElementById('inputFormat').value = 'geojson';
+            document.getElementById('inputText').placeholder = INPUT_PLACEHOLDERS.geojson;
             document.getElementById('inputText').value = JSON.stringify(DEFAULT_GEOJSON, null, 2);
+            syncCopyFormatVisibility();
             submitInput();
         }
     </script>
