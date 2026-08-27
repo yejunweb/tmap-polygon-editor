@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>多边形坐标调整</title>
+    <script charset="utf-8"
+        src="https://map.qq.com/api/gljs?libraries=tools&v=1.exp&key=OB4BZ-D4W3U-B7VVO-4PJWW-6TKDJ-WPB77"></script>
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+            color: #1d2129;
+        }
+
+        .app {
+            display: flex;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #container {
+            flex: 1;
+            min-width: 0;
+            height: 100%;
+            position: relative;
+            z-index: 1;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            position: relative;
+            z-index: 5;
+            width: 400px;
+            flex: 0 0 400px;
+            min-width: 0;
+            box-sizing: border-box;
+            background: #f2f3f5;
+            border-left: 1px solid #e5e6eb;
+            overflow: visible;
+            transition: flex-basis 0.2s ease, width 0.2s ease, border-width 0.2s ease;
+        }
+
+        .sidebar-inner {
+            width: 400px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 12px;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+
+        .app.collapsed .sidebar {
+            flex-basis: 0;
+            width: 0;
+            border-left-width: 0;
+        }
+
+        .app.collapsed .sidebar-inner {
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        .sidebar-toggle {
+            position: absolute;
+            left: -18px;
+            top: 50%;
+            z-index: 10;
+            width: 18px;
+            height: 64px;
+            margin: 0;
+            padding: 0;
+            transform: translateY(-50%);
+            border: 1px solid #e5e6eb;
+            border-right: none;
+            border-radius: 6px 0 0 6px;
+            background: #fff;
+            color: #4e5969;
+            cursor: pointer;
+            box-shadow: -2px 0 8px rgba(0, 0, 0, 0.06);
+        }
+
+        .sidebar-toggle:hover {
+            background: #f2f3f5;
+        }
+
+        .app.collapsed .sidebar-toggle {
+            border-right: 1px solid #e5e6eb;
+        }
+
+        .panel {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            background: #fff;
+            border: 1px solid #e5e6eb;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 10px 12px;
+            border-bottom: 1px solid #f2f3f5;
+            flex-shrink: 0;
+        }
+
+        .panel-title {
+            font-size: 14px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .field-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-left: 0;
+            font-size: 12px;
+            color: #86909c;
+            white-space: nowrap;
+        }
+
+        .panel-header select {
+            height: 28px;
+            padding: 0 8px;
+            border: 1px solid #e5e6eb;
+            border-radius: 4px;
+            background: #fff;
+            color: #4e5969;
+            font-size: 12px;
+        }
+
+        .spacer {
+            flex: 1;
+        }
+
+        .btn {
+            height: 28px;
+            padding: 0 12px;
+            border: 1px solid #165dff;
+            border-radius: 4px;
+            background: #fff;
+            color: #165dff;
+            font-size: 13px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .btn:hover {
+            background: #f0f5ff;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .panel textarea {
+            flex: 1;
+            min-height: 0;
+            width: 100%;
+            box-sizing: border-box;
+            border: none;
+            resize: none;
+            padding: 12px;
+            font-size: 12px;
+            line-height: 1.5;
+            font-family: "SF Mono", Menlo, Consolas, monospace;
+            outline: none;
+            background: #fff;
+        }
+
+        .error {
+            margin: 0;
+            padding: 0 12px 8px;
+            color: #f53f3f;
+            font-size: 12px;
+            display: none;
+        }
+
+        .error.show {
+            display: block;
+        }
+
+        .toast {
+            position: absolute;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 30;
+            padding: 8px 14px;
+            border-radius: 6px;
+            background: rgba(0, 0, 0, 0.72);
+            color: #fff;
+            font-size: 13px;
+            display: none;
+        }
+
+        .toast.show {
+            display: block;
+        }
+    </style>
+</head>
+
+<body onload="initMap()">
+    <div class="app" id="app">
+        <div id="container"></div>
+        <aside class="sidebar" id="sidebar">
+            <button class="sidebar-toggle" id="sidebarToggle" type="button" title="收起侧栏" aria-expanded="true">‹</button>
+            <div class="sidebar-inner">
+            <section class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">输入</span>
+                    <span class="spacer"></span>
+                    <button class="btn" id="submitBtn" type="button">确定</button>
+                </div>
+                <p class="error" id="inputError"></p>
+                <textarea id="inputText" spellcheck="false"
+                    placeholder="支持数组或 GeoJSON"></textarea>
+            </section>
+            <section class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">输出结果</span>
+                    <label class="field-label">输出类型
+                        <select id="outputFormat">
+                            <option value="array">数组</option>
+                            <option value="geojson">GeoJSON</option>
+                        </select>
+                    </label>
+                    <label class="field-label">复制格式
+                        <select id="copyFormat">
+                            <option value="json">JSON</option>
+                            <option value="pretty">格式化</option>
+                        </select>
+                    </label>
+                    <span class="spacer"></span>
+                    <button class="btn" id="copyBtn" type="button">复制</button>
+                </div>
+                <textarea id="outputText" spellcheck="false" readonly placeholder="调整完成后在此输出"></textarea>
+            </section>
+            </div>
+        </aside>
+        <div class="toast" id="toast"></div>
+    </div>
+
+    <script type="text/javascript">
+        var map, editor, polygonLayer;
+        var lastPaths = null;
+        var POLYGON_ID = 'polygon-1';
+        var LAYER_ID = 'polygon';
+        var DEFAULT_GEOJSON = {
+            type: 'Polygon',
+            coordinates: [[
+                [113.919627, 22.486852],
+                [113.921423, 22.479975],
+                [113.921658, 22.479927],
+                [113.921619, 22.479426],
+                [113.921006, 22.478628],
+                [113.918382, 22.479492],
+                [113.916695, 22.478365],
+                [113.916695, 22.476893],
+                [113.919506, 22.477419],
+                [113.919600, 22.475510],
+                [113.918663, 22.474643],
+                [113.917257, 22.474643],
+                [113.914914, 22.476373],
+                [113.912853, 22.474814],
+                [113.914352, 22.473255],
+                [113.914352, 22.472562],
+                [113.916694, 22.471351],
+                [113.917444, 22.470746],
+                [113.916928, 22.469662],
+                [113.915569, 22.470095],
+                [113.915147, 22.469359],
+                [113.916272, 22.468969],
+                [113.916178, 22.468622],
+                [113.914960, 22.469012],
+                [113.914773, 22.468536],
+                [113.915803, 22.468146],
+                [113.915709, 22.467843],
+                [113.914632, 22.468059],
+                [113.914445, 22.467669],
+                [113.915569, 22.467236],
+                [113.915381, 22.466760],
+                [113.911493, 22.468231],
+                [113.908401, 22.471912],
+                [113.908120, 22.471479],
+                [113.908026, 22.470743],
+                [113.907511, 22.470699],
+                [113.906246, 22.469660],
+                [113.909291, 22.466368],
+                [113.903811, 22.462644],
+                [113.901750, 22.464723],
+                [113.899362, 22.463338],
+                [113.900299, 22.458529],
+                [113.901235, 22.455498],
+                [113.900861, 22.454458],
+                [113.896646, 22.449523],
+                [113.891778, 22.443462],
+                [113.890654, 22.444329],
+                [113.890655, 22.448054],
+                [113.890187, 22.452212],
+                [113.892059, 22.454809],
+                [113.891123, 22.458361],
+                [113.892808, 22.459486],
+                [113.892340, 22.462951],
+                [113.892340, 22.463817],
+                [113.890749, 22.464771],
+                [113.889064, 22.464079],
+                [113.888035, 22.465813],
+                [113.887847, 22.469971],
+                [113.888784, 22.470749],
+                [113.889533, 22.470748],
+                [113.890749, 22.472741],
+                [113.884197, 22.475777],
+                [113.882326, 22.472141],
+                [113.883355, 22.470321],
+                [113.885694, 22.467547],
+                [113.886817, 22.454899],
+                [113.885132, 22.454208],
+                [113.876491, 22.471723],
+                [113.919627, 22.486852]
+            ]]
+        };
+
+        function showToast(message) {
+            var toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            clearTimeout(showToast._timer);
+            showToast._timer = setTimeout(function () {
+                toast.classList.remove('show');
+            }, 1600);
+        }
+
+        function showInputError(message) {
+            var el = document.getElementById('inputError');
+            if (!message) {
+                el.textContent = '';
+                el.classList.remove('show');
+                return;
+            }
+            el.textContent = message;
+            el.classList.add('show');
+        }
+
+        function toLatLng(point) {
+            if (!point) return null;
+            var lat = typeof point.getLat === 'function' ? point.getLat() : point.lat;
+            var lng = typeof point.getLng === 'function' ? point.getLng() : point.lng;
+            return { lat: lat, lng: lng };
+        }
+
+        function serializePaths(paths) {
+            if (!paths || !paths.length) return [];
+            var first = paths[0];
+            if (first && (typeof first.lat === 'number' || typeof first.getLat === 'function')) {
+                return paths.map(toLatLng);
+            }
+            return paths.map(serializePaths);
+        }
+
+        function createLatLng(lat, lng) {
+            return new TMap.LatLng(Number(lat), Number(lng));
+        }
+
+        function isFiniteNumber(value) {
+            return typeof value === 'number' && isFinite(value);
+        }
+
+        function isCoordObject(value) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+            var lat = value.lat != null ? value.lat : (value.latitude != null ? value.latitude : value.Lat);
+            var lng = value.lng != null ? value.lng : (value.lon != null ? value.lon : (value.longitude != null ? value.longitude : value.Lng));
+            return isFiniteNumber(Number(lat)) && isFiniteNumber(Number(lng));
+        }
+
+        function isCoordPair(value) {
+            return Array.isArray(value) && value.length >= 2 && isFiniteNumber(Number(value[0])) && isFiniteNumber(Number(value[1]));
+        }
+
+        function objectToLatLng(value) {
+            var lat = value.lat != null ? value.lat : (value.latitude != null ? value.latitude : value.Lat);
+            var lng = value.lng != null ? value.lng : (value.lon != null ? value.lon : (value.longitude != null ? value.longitude : value.Lng));
+            return createLatLng(lat, lng);
+        }
+
+        function pairToLatLng(pair) {
+            var a = Number(pair[0]);
+            var b = Number(pair[1]);
+            if (Math.abs(a) > 90 && Math.abs(b) <= 90) {
+                return createLatLng(b, a);
+            }
+            return createLatLng(a, b);
+        }
+
+        function ringToLatLngs(ring) {
+            if (!Array.isArray(ring) || !ring.length) {
+                throw new Error('坐标环不能为空');
+            }
+            if (isCoordObject(ring[0])) {
+                return ring.map(objectToLatLng);
+            }
+            if (isCoordPair(ring[0])) {
+                return ring.map(pairToLatLng);
+            }
+            throw new Error('无法识别的坐标点格式');
+        }
+
+        function looksLikeRing(value) {
+            return Array.isArray(value) && value.length && (isCoordObject(value[0]) || isCoordPair(value[0]));
+        }
+
+        function looksLikePolygonRings(value) {
+            return Array.isArray(value) && value.length && looksLikeRing(value[0]);
+        }
+
+        function geojsonCoordsToPaths(coordinates) {
+            if (!looksLikePolygonRings(coordinates)) {
+                throw new Error('GeoJSON coordinates 格式不正确');
+            }
+            var rings = coordinates.map(ringToLatLngs);
+            return rings.length === 1 ? rings[0] : rings;
+        }
+
+        function parseGeoJSONGeometry(geometry) {
+            if (!geometry || !geometry.type) {
+                throw new Error('缺少 GeoJSON geometry');
+            }
+            if (geometry.type === 'Polygon') {
+                return [geojsonCoordsToPaths(geometry.coordinates)];
+            }
+            if (geometry.type === 'MultiPolygon') {
+                if (!Array.isArray(geometry.coordinates) || !geometry.coordinates.length) {
+                    throw new Error('MultiPolygon coordinates 不能为空');
+                }
+                return geometry.coordinates.map(geojsonCoordsToPaths);
+            }
+            throw new Error('仅支持 Polygon / MultiPolygon');
+        }
+
+        function parseInputToPathList(rawText) {
+            var text = (rawText || '').trim();
+            if (!text) {
+                throw new Error('请输入坐标数组或 GeoJSON');
+            }
+            var data;
+            try {
+                data = JSON.parse(text);
+            } catch (err) {
+                throw new Error('JSON 解析失败，请检查输入格式');
+            }
+
+            if (data && data.type === 'FeatureCollection') {
+                if (!data.features || !data.features.length || !data.features[0].geometry) {
+                    throw new Error('FeatureCollection 中没有可用的 geometry');
+                }
+                return parseGeoJSONGeometry(data.features[0].geometry);
+            }
+            if (data && data.type === 'Feature') {
+                return parseGeoJSONGeometry(data.geometry);
+            }
+            if (data && (data.type === 'Polygon' || data.type === 'MultiPolygon')) {
+                return parseGeoJSONGeometry(data);
+            }
+            if (data && data.geometry && (data.geometry.type === 'Polygon' || data.geometry.type === 'MultiPolygon')) {
+                return parseGeoJSONGeometry(data.geometry);
+            }
+
+            if (!Array.isArray(data) || !data.length) {
+                throw new Error('数组不能为空');
+            }
+
+            if (looksLikePolygonRings(data) && looksLikePolygonRings(data[0])) {
+                return data.map(function (polygon) {
+                    var rings = polygon.map(ringToLatLngs);
+                    return rings.length === 1 ? rings[0] : rings;
+                });
+            }
+            if (looksLikePolygonRings(data)) {
+                var rings = data.map(ringToLatLngs);
+                return [rings.length === 1 ? rings[0] : rings];
+            }
+            if (looksLikeRing(data)) {
+                return [ringToLatLngs(data)];
+            }
+            throw new Error('无法识别的输入格式，请使用坐标数组或 GeoJSON');
+        }
+
+        function flattenLatLngs(paths, result) {
+            result = result || [];
+            if (!paths || !paths.length) return result;
+            var first = paths[0];
+            if (first && (typeof first.getLat === 'function' || typeof first.lat === 'number')) {
+                for (var i = 0; i < paths.length; i++) {
+                    result.push(paths[i]);
+                }
+                return result;
+            }
+            for (var j = 0; j < paths.length; j++) {
+                flattenLatLngs(paths[j], result);
+            }
+            return result;
+        }
+
+        function getPolygonCenter(pathList) {
+            var points = [];
+            for (var i = 0; i < pathList.length; i++) {
+                flattenLatLngs(pathList[i], points);
+            }
+            if (!points.length) {
+                throw new Error('没有可用于定位的坐标点');
+            }
+            var latSum = 0;
+            var lngSum = 0;
+            for (var k = 0; k < points.length; k++) {
+                var item = toLatLng(points[k]);
+                latSum += item.lat;
+                lngSum += item.lng;
+            }
+            return createLatLng(latSum / points.length, lngSum / points.length);
+        }
+
+        function fitToPolygon(pathList) {
+            var points = [];
+            for (var i = 0; i < pathList.length; i++) {
+                flattenLatLngs(pathList[i], points);
+            }
+            if (!points.length) return;
+            var center = getPolygonCenter(pathList);
+            map.setCenter(center);
+            if (typeof TMap.LatLngBounds === 'function' && typeof map.fitBounds === 'function' && points.length > 1) {
+                var bounds = new TMap.LatLngBounds();
+                for (var j = 0; j < points.length; j++) {
+                    bounds.extend(points[j]);
+                }
+                try {
+                    map.fitBounds(bounds, { padding: 80 });
+                } catch (err) {
+                    map.fitBounds(bounds);
+                }
+                map.setCenter(center);
+            }
+        }
+
+        function closeRing(ring) {
+            if (!ring.length) return ring;
+            var first = ring[0];
+            var last = ring[ring.length - 1];
+            if (first[0] === last[0] && first[1] === last[1]) return ring.slice();
+            return ring.concat([first.slice()]);
+        }
+
+        function serializedToGeoJSONCoordinates(paths) {
+            if (!paths || !paths.length) return [];
+            if (typeof paths[0].lat === 'number') {
+                return [closeRing(paths.map(function (p) { return [p.lng, p.lat]; }))];
+            }
+            return paths.map(function (ring) {
+                if (typeof ring[0].lat === 'number') {
+                    return closeRing(ring.map(function (p) { return [p.lng, p.lat]; }));
+                }
+                return serializedToGeoJSONCoordinates(ring)[0];
+            });
+        }
+
+        function formatOutput(paths, format) {
+            if (!paths) return '';
+            if (format === 'geojson') {
+                var geojson;
+                if (typeof paths[0].lat === 'number') {
+                    geojson = { type: 'Polygon', coordinates: serializedToGeoJSONCoordinates(paths) };
+                } else if (paths[0] && paths[0].length && typeof paths[0][0].lat === 'number') {
+                    geojson = { type: 'Polygon', coordinates: serializedToGeoJSONCoordinates(paths) };
+                } else {
+                    geojson = { type: 'MultiPolygon', coordinates: paths.map(serializedToGeoJSONCoordinates) };
+                }
+                return JSON.stringify(geojson, null, 2);
+            }
+            return JSON.stringify(paths, null, 2);
+        }
+
+        function refreshOutput() {
+            document.getElementById('outputText').value = formatOutput(
+                lastPaths,
+                document.getElementById('outputFormat').value
+            );
+        }
+
+        function bindEditorEvents() {
+            editor.on('adjust_complete', function (geometry) {
+                lastPaths = serializePaths(geometry.paths);
+                refreshOutput();
+            });
+        }
+
+        function renderPolygons(pathList) {
+            var geometries = pathList.map(function (paths, index) {
+                return {
+                    id: index === 0 ? POLYGON_ID : POLYGON_ID + '-' + index,
+                    paths: paths
+                };
+            });
+
+            if (!polygonLayer) {
+                polygonLayer = new TMap.MultiPolygon({
+                    map: map,
+                    styles: {
+                        highlight: new TMap.PolygonStyle({
+                            color: 'rgba(255, 255, 0, 0.6)'
+                        })
+                    },
+                    geometries: geometries
+                });
+                editor = new TMap.tools.GeometryEditor({
+                    map: map,
+                    overlayList: [{
+                        overlay: polygonLayer,
+                        id: LAYER_ID,
+                        selectedStyleId: 'highlight'
+                    }],
+                    actionMode: TMap.tools.constants.EDITOR_ACTION.INTERACT,
+                    activeOverlayId: LAYER_ID,
+                    selectable: true,
+                    snappable: true
+                });
+                bindEditorEvents();
+            } else {
+                polygonLayer.setGeometries(geometries);
+            }
+
+            if (editor && typeof editor.select === 'function') {
+                editor.select([geometries[0].id]);
+            }
+        }
+
+        function submitInput() {
+            showInputError('');
+            try {
+                var pathList = parseInputToPathList(document.getElementById('inputText').value);
+                renderPolygons(pathList);
+                fitToPolygon(pathList);
+                lastPaths = serializePaths(pathList.length === 1 ? pathList[0] : pathList);
+                refreshOutput();
+            } catch (err) {
+                showInputError(err.message || '输入解析失败');
+            }
+        }
+
+        function getCopyText() {
+            var pretty = document.getElementById('outputText').value;
+            if (!pretty) return '';
+            var copyFormat = document.getElementById('copyFormat').value;
+            if (copyFormat === 'json') {
+                try {
+                    return JSON.stringify(JSON.parse(pretty));
+                } catch (err) {
+                    return pretty;
+                }
+            }
+            return pretty;
+        }
+
+        function copyOutput() {
+            var text = getCopyText();
+            if (!text) {
+                showToast('暂无输出内容');
+                return;
+            }
+            var btn = document.getElementById('copyBtn');
+            var restore = function (ok) {
+                btn.textContent = ok ? '已复制' : '复制';
+                showToast(ok ? '已复制到剪贴板' : '复制失败，请手动复制');
+                setTimeout(function () {
+                    btn.textContent = '复制';
+                }, 1200);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(function () {
+                    restore(true);
+                }).catch(function () {
+                    fallbackCopy(text, restore);
+                });
+            } else {
+                fallbackCopy(text, restore);
+            }
+        }
+
+        function fallbackCopy(text, restore) {
+            var helper = document.createElement('textarea');
+            helper.value = text;
+            helper.setAttribute('readonly', 'readonly');
+            helper.style.position = 'fixed';
+            helper.style.left = '-9999px';
+            document.body.appendChild(helper);
+            helper.select();
+            try {
+                restore(document.execCommand('copy'));
+            } catch (err) {
+                restore(false);
+            }
+            document.body.removeChild(helper);
+            window.getSelection().removeAllRanges();
+        }
+
+        function resizeMap() {
+            if (map && typeof map.resize === 'function') {
+                map.resize();
+            }
+        }
+
+        function initMap() {
+            map = new TMap.Map('container', {
+                zoom: 12,
+                center: new TMap.LatLng(22.5431, 114.0579)
+            });
+
+            document.getElementById('submitBtn').addEventListener('click', submitInput);
+            document.getElementById('copyBtn').addEventListener('click', copyOutput);
+            document.getElementById('outputFormat').addEventListener('change', refreshOutput);
+            document.getElementById('sidebarToggle').addEventListener('mousedown', function (event) {
+                event.stopPropagation();
+            });
+            document.getElementById('sidebarToggle').addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                var app = document.getElementById('app');
+                var collapsed = app.classList.toggle('collapsed');
+                this.textContent = collapsed ? '›' : '‹';
+                this.title = collapsed ? '展开侧栏' : '收起侧栏';
+                this.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+                setTimeout(resizeMap, 220);
+            });
+            window.addEventListener('resize', resizeMap);
+
+            document.getElementById('inputText').value = JSON.stringify(DEFAULT_GEOJSON, null, 2);
+            submitInput();
+        }
+    </script>
+</body>
+
+</html>
